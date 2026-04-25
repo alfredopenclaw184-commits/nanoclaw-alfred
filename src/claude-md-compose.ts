@@ -116,7 +116,7 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
   }
 
   // Composed entry — imports only.
-  const imports = ['@./.claude-shared.md'];
+  const imports = ['@./.claude-shared.md', '@./CLAUDE.local.md'];
   for (const name of [...desired.keys()].sort()) {
     imports.push(`@./.claude-fragments/${name}`);
   }
