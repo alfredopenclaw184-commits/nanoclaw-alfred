@@ -234,7 +234,7 @@ interface QueryResult {
   continuation?: string;
 }
 
-async function processQuery(
+export async function processQuery(
   query: AgentQuery,
   routing: RoutingContext,
   initialBatchIds: string[],
@@ -291,15 +291,15 @@ async function processQuery(
         setStoredSessionId(event.continuation);
       } else if (event.type === 'result') {
         // A result — with or without text — means the turn is done. Mark
-        // the initial batch completed now so the host sweep doesn't see
-        // stale 'processing' claims while the query stays open for
-        // follow-up pushes. The agent may have responded via MCP
-        // (send_message) mid-turn, or the message may not need a response
-        // at all — either way the turn is finished.
+        // the initial batch completed and close the provider query so the
+        // outer DB poll loop resumes. Keeping the stream open here left the
+        // container "active" but idle; host wake then no-oped and later
+        // Discord messages could sit pending until a watchdog/restart.
         markCompleted(initialBatchIds);
         if (event.text) {
           dispatchResultText(event.text, routing);
         }
+        query.end();
       }
     }
   } finally {

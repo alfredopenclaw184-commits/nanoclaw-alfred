@@ -5,6 +5,7 @@ import { getPendingMessages, markCompleted } from './db/messages-in.js';
 import { getUndeliveredMessages } from './db/messages-out.js';
 import { formatMessages, extractRouting } from './formatter.js';
 import { MockProvider } from './providers/mock.js';
+import { processQuery } from './poll-loop.js';
 
 beforeEach(() => {
   initTestSessionDb();
@@ -189,6 +190,23 @@ describe('mock provider', () => {
     expect(results).toHaveLength(2);
     expect(results[0].text).toBe('Re: First');
     expect(results[1].text).toBe('Re: Second');
+  });
+});
+
+describe('processQuery', () => {
+  it('ends the provider query after a result so the outer DB poll loop can resume', async () => {
+    insertMessage('m1', 'chat', { sender: 'User', text: 'Hello' });
+    const messages = getPendingMessages();
+    const routing = extractRouting(messages);
+    const provider = new MockProvider({}, () => 'Done');
+    const query = provider.query({ prompt: formatMessages(messages), cwd: '/tmp' });
+
+    const outcome = await Promise.race([
+      processQuery(query, routing, ['m1']).then(() => 'resolved'),
+      new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 100)),
+    ]);
+
+    expect(outcome).toBe('resolved');
   });
 });
 
