@@ -97,6 +97,54 @@ export function splitForLimit(text: string, limit: number): string[] {
   return chunks;
 }
 
+export async function enrichAttachmentsForInbound(
+  message: Pick<ChatMessage, 'attachments'>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<Array<Record<string, any>>> {
+  const enriched = [];
+  for (const att of message.attachments ?? []) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawAttachment = att as unknown as Record<string, unknown>;
+    const url = rawAttachment.url;
+    const proxyUrl = rawAttachment.proxyUrl;
+    const entry: Record<string, any> = {
+      type: att.type,
+      name: att.name,
+      mimeType: att.mimeType,
+      size: att.size,
+      width: rawAttachment.width,
+      height: rawAttachment.height,
+    };
+    if (typeof url === 'string') entry.url = url;
+    if (typeof proxyUrl === 'string') entry.proxyUrl = proxyUrl;
+
+    try {
+      if (att.fetchData) {
+        const buffer = await att.fetchData();
+        entry.data = buffer.toString('base64');
+      } else if (typeof url === 'string') {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`Attachment download failed with HTTP ${response.status}`);
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+        entry.data = buffer.toString('base64');
+      }
+    } catch (err) {
+      log.warn('Failed to download attachment', {
+        type: att.type,
+        name: att.name,
+        mimeType: att.mimeType,
+        size: att.size,
+        urlPresent: typeof url === 'string',
+        err,
+      });
+    }
+    enriched.push(entry);
+  }
+  return enriched;
+}
+
 export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter {
   const { adapter } = config;
   const transformText = (t: string): string => (config.transformOutboundText ? config.transformOutboundText(t) : t);
@@ -111,28 +159,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
 
     // Download attachment data before serialization loses fetchData()
     if (message.attachments && message.attachments.length > 0) {
-      const enriched = [];
-      for (const att of message.attachments) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const entry: Record<string, any> = {
-          type: att.type,
-          name: att.name,
-          mimeType: att.mimeType,
-          size: att.size,
-          width: (att as unknown as Record<string, unknown>).width,
-          height: (att as unknown as Record<string, unknown>).height,
-        };
-        if (att.fetchData) {
-          try {
-            const buffer = await att.fetchData();
-            entry.data = buffer.toString('base64');
-          } catch (err) {
-            log.warn('Failed to download attachment', { type: att.type, err });
-          }
-        }
-        enriched.push(entry);
-      }
-      serialized.attachments = enriched;
+      serialized.attachments = await enrichAttachmentsForInbound(message);
     }
 
     // Extract reply context via platform-specific hook

@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Adapter } from 'chat';
 
-import { createChatSdkBridge, splitForLimit } from './chat-sdk-bridge.js';
+import { createChatSdkBridge, enrichAttachmentsForInbound, splitForLimit } from './chat-sdk-bridge.js';
 
 function stubAdapter(partial: Partial<Adapter>): Adapter {
   return { name: 'stub', ...partial } as unknown as Adapter;
@@ -33,6 +33,66 @@ describe('splitForLimit', () => {
     expect(chunks.length).toBe(Math.ceil(100 / 30));
     for (const c of chunks) expect(c.length).toBeLessThanOrEqual(30);
     expect(chunks.join('')).toBe(text);
+  });
+});
+
+describe('enrichAttachmentsForInbound', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('downloads attachments from a URL when fetchData is absent', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('attachment body', {
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+      }),
+    );
+
+    const enriched = await enrichAttachmentsForInbound({
+      attachments: [
+        {
+          type: 'file',
+          url: 'https://cdn.example.test/smoke.txt',
+          name: 'smoke.txt',
+          mimeType: 'text/plain',
+          size: 15,
+        },
+      ],
+    } as any);
+
+    expect(fetchSpy).toHaveBeenCalledWith('https://cdn.example.test/smoke.txt');
+    expect(enriched).toEqual([
+      expect.objectContaining({
+        type: 'file',
+        url: 'https://cdn.example.test/smoke.txt',
+        name: 'smoke.txt',
+        mimeType: 'text/plain',
+        size: 15,
+        data: Buffer.from('attachment body').toString('base64'),
+      }),
+    ]);
+  });
+
+  it('keeps the existing fetchData path for adapters that provide it', async () => {
+    const enriched = await enrichAttachmentsForInbound({
+      attachments: [
+        {
+          type: 'file',
+          name: 'fetch-data.txt',
+          mimeType: 'text/plain',
+          size: 10,
+          fetchData: async () => Buffer.from('via helper'),
+        },
+      ],
+    } as any);
+
+    expect(enriched[0]).toEqual(
+      expect.objectContaining({
+        name: 'fetch-data.txt',
+        data: Buffer.from('via helper').toString('base64'),
+      }),
+    );
   });
 });
 
