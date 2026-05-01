@@ -378,6 +378,13 @@ async function buildContainerArgs(
 ): Promise<string[]> {
   const args: string[] = ['run', '--rm', '--name', containerName];
 
+  if (containerConfig.memory) {
+    args.push('--memory', containerConfig.memory);
+  }
+  if (containerConfig.cpus) {
+    args.push('--cpus', String(containerConfig.cpus));
+  }
+
   // Environment — only vars read by code we don't own.
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);

@@ -47,6 +47,10 @@ export interface ContainerConfig {
   agentGroupId?: string;
   /** Max messages per prompt. Falls back to code default if unset. */
   maxMessagesPerPrompt?: number;
+  /** Optional container memory limit, e.g. "4096M". */
+  memory?: string;
+  /** Optional container CPU limit. */
+  cpus?: number;
 }
 
 function emptyConfig(): ContainerConfig {
@@ -87,6 +91,8 @@ export function readContainerConfig(folder: string): ContainerConfig {
       assistantName: raw.assistantName,
       agentGroupId: raw.agentGroupId,
       maxMessagesPerPrompt: raw.maxMessagesPerPrompt,
+      memory: raw.memory,
+      cpus: raw.cpus,
     };
   } catch (err) {
     console.error(`[container-config] failed to parse ${p}: ${String(err)}`);
