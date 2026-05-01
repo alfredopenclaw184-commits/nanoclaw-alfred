@@ -89,6 +89,11 @@ export function startOneCLIApprovalHandler(deliveryAdapter: ChannelDeliveryAdapt
   // Sweep any rows left over from a previous process.
   sweepStaleApprovals().catch((err) => log.error('OneCLI approval sweep failed', { err }));
 
+  if (!ONECLI_API_KEY) {
+    log.warn('OneCLI approval handler not started: ONECLI_API_KEY is not configured');
+    return;
+  }
+
   handle = onecli.configureManualApproval(async (request: ApprovalRequest): Promise<Decision> => {
     try {
       return await handleRequest(request);
