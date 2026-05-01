@@ -8,7 +8,7 @@
  * processing_ack. The host reads processing_ack to sync message lifecycle.
  */
 import { getConfig } from '../config.js';
-import { getInboundDb, getOutboundDb } from './connection.js';
+import { getInboundDb, getOutboundDb, refreshInboundDb } from './connection.js';
 
 export interface MessageInRow {
   id: string;
@@ -50,6 +50,7 @@ function getMaxMessagesPerPrompt(): number {
  * trigger=1 separately (see src/db/session-db.ts).
  */
 export function getPendingMessages(): MessageInRow[] {
+  refreshInboundDb();
   const inbound = getInboundDb();
   const outbound = getOutboundDb();
 

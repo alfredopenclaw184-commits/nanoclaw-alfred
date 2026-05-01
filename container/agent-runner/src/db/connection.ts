@@ -26,21 +26,51 @@ const DEFAULT_HEARTBEAT_PATH = '/workspace/.heartbeat';
 
 let _inbound: Database | null = null;
 let _outbound: Database | null = null;
+let _inboundPath: string | null = null;
+let _outboundPath: string | null = null;
 let _heartbeatPath: string = DEFAULT_HEARTBEAT_PATH;
+
+function inboundPath(): string {
+  return process.env.NANOCLAW_INBOUND_DB_PATH || DEFAULT_INBOUND_PATH;
+}
+
+function outboundPath(): string {
+  return process.env.NANOCLAW_OUTBOUND_DB_PATH || DEFAULT_OUTBOUND_PATH;
+}
 
 /** Inbound DB — container opens read-only (host is the sole writer). */
 export function getInboundDb(): Database {
-  if (!_inbound) {
-    _inbound = new Database(DEFAULT_INBOUND_PATH, { readonly: true });
+  const path = inboundPath();
+  if (!_inbound || (_inboundPath !== ':memory:' && _inboundPath !== path)) {
+    _inbound?.close();
+    _inbound = new Database(path, { readonly: true });
     _inbound.exec('PRAGMA busy_timeout = 5000');
+    _inboundPath = path;
   }
   return _inbound;
 }
 
+/**
+ * Reopen the read-only inbound handle before polling.
+ *
+ * Host writes arrive through a mounted SQLite file. On Apple Container
+ * virtiofs/Bun SQLite, a warm long-lived read handle can lag behind host-side
+ * updates. Reopening is cheap and forces a fresh file view before each poll.
+ */
+export function refreshInboundDb(): void {
+  if (!_inbound || _inboundPath === ':memory:') return;
+  _inbound.close();
+  _inbound = null;
+  _inboundPath = null;
+}
+
 /** Outbound DB — container owns this file (sole writer). */
 export function getOutboundDb(): Database {
-  if (!_outbound) {
-    _outbound = new Database(DEFAULT_OUTBOUND_PATH);
+  const path = outboundPath();
+  if (!_outbound || (_outboundPath !== ':memory:' && _outboundPath !== path)) {
+    _outbound?.close();
+    _outbound = new Database(path);
+    _outboundPath = path;
     _outbound.exec('PRAGMA journal_mode = DELETE');
     _outbound.exec('PRAGMA busy_timeout = 5000');
     _outbound.exec('PRAGMA foreign_keys = ON');
@@ -145,6 +175,7 @@ export function clearStaleProcessingAcks(): void {
 /** For tests — creates in-memory DBs with the session schemas. */
 export function initTestSessionDb(): { inbound: Database; outbound: Database } {
   _inbound = new Database(':memory:');
+  _inboundPath = ':memory:';
   _inbound.exec('PRAGMA foreign_keys = ON');
   _inbound.exec(`
     CREATE TABLE messages_in (
@@ -180,6 +211,7 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
   `);
 
   _outbound = new Database(':memory:');
+  _outboundPath = ':memory:';
   _outbound.exec('PRAGMA foreign_keys = ON');
   _outbound.exec(`
     CREATE TABLE messages_out (
@@ -220,8 +252,10 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
 export function closeSessionDb(): void {
   _inbound?.close();
   _inbound = null;
+  _inboundPath = null;
   _outbound?.close();
   _outbound = null;
+  _outboundPath = null;
 }
 
 /**

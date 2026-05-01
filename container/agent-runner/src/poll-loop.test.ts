@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { Database } from 'bun:sqlite';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from './db/connection.js';
 import { getPendingMessages, markCompleted } from './db/messages-in.js';
@@ -23,6 +27,83 @@ function insertMessage(id: string, kind: string, content: object, opts?: { proce
     )
     .run(id, kind, opts?.processAfter ?? null, opts?.trigger ?? 1, JSON.stringify(content));
 }
+
+function createInboundDb(filePath: string, messages: Array<{ id: string; text: string }> = []) {
+  const db = new Database(filePath);
+  db.exec(`
+    PRAGMA journal_mode = DELETE;
+    CREATE TABLE messages_in (
+      id             TEXT PRIMARY KEY,
+      seq            INTEGER UNIQUE,
+      kind           TEXT NOT NULL,
+      timestamp      TEXT NOT NULL,
+      status         TEXT DEFAULT 'pending',
+      process_after  TEXT,
+      recurrence     TEXT,
+      series_id      TEXT,
+      tries          INTEGER DEFAULT 0,
+      trigger        INTEGER NOT NULL DEFAULT 1,
+      platform_id    TEXT,
+      channel_type   TEXT,
+      thread_id      TEXT,
+      content        TEXT NOT NULL
+    );
+  `);
+  const stmt = db.prepare(
+    `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, content)
+     VALUES (?, ?, 'chat', datetime('now'), 'pending', 1, ?)`,
+  );
+  messages.forEach((msg, index) => stmt.run(msg.id, index + 1, JSON.stringify({ text: msg.text })));
+  db.close();
+}
+
+function createOutboundDb(filePath: string) {
+  const db = new Database(filePath);
+  db.exec(`
+    PRAGMA journal_mode = DELETE;
+    CREATE TABLE processing_ack (
+      message_id     TEXT PRIMARY KEY,
+      status         TEXT NOT NULL,
+      status_changed TEXT NOT NULL
+    );
+  `);
+  db.close();
+}
+
+describe('inbound DB visibility', () => {
+  it('refreshes the read-only inbound handle before polling so warm containers see host-updated files', () => {
+    closeSessionDb();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-inbound-refresh-'));
+    const inboundPath = path.join(dir, 'inbound.db');
+    const replacementPath = path.join(dir, 'inbound-replacement.db');
+    const outboundPath = path.join(dir, 'outbound.db');
+    const previousInbound = process.env.NANOCLAW_INBOUND_DB_PATH;
+    const previousOutbound = process.env.NANOCLAW_OUTBOUND_DB_PATH;
+
+    try {
+      createInboundDb(inboundPath);
+      createOutboundDb(outboundPath);
+      process.env.NANOCLAW_INBOUND_DB_PATH = inboundPath;
+      process.env.NANOCLAW_OUTBOUND_DB_PATH = outboundPath;
+
+      expect(getPendingMessages()).toHaveLength(0);
+
+      createInboundDb(replacementPath, [{ id: 'm-after-empty-poll', text: 'host wrote this after the warm reader was open' }]);
+      fs.renameSync(replacementPath, inboundPath);
+
+      const messages = getPendingMessages();
+      expect(messages.map((m) => m.id)).toEqual(['m-after-empty-poll']);
+    } finally {
+      closeSessionDb();
+      if (previousInbound === undefined) delete process.env.NANOCLAW_INBOUND_DB_PATH;
+      else process.env.NANOCLAW_INBOUND_DB_PATH = previousInbound;
+      if (previousOutbound === undefined) delete process.env.NANOCLAW_OUTBOUND_DB_PATH;
+      else process.env.NANOCLAW_OUTBOUND_DB_PATH = previousOutbound;
+      fs.rmSync(dir, { recursive: true, force: true });
+      initTestSessionDb();
+    }
+  });
+});
 
 describe('formatter', () => {
   it('should format a single chat message', () => {
