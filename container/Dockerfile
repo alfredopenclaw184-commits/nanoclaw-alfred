@@ -48,6 +48,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libxshmfence1 \
         ca-certificates \
         curl \
+        ffmpeg \
         git \
         tini \
         unzip \
@@ -96,6 +97,8 @@ RUN corepack enable
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     echo "only-built-dependencies[]=agent-browser" > /root/.npmrc && \
     echo "only-built-dependencies[]=@anthropic-ai/claude-code" >> /root/.npmrc && \
+    echo "only-built-dependencies[]=sharp" >> /root/.npmrc && \
+    echo "only-built-dependencies[]=@xenova/transformers" >> /root/.npmrc && \
     pnpm install -g "vercel@${VERCEL_VERSION}"
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
@@ -103,6 +106,15 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+RUN --mount=type=cache,target=/root/.cache/pnpm \
+    pnpm install -g "@xenova/transformers"
+
+COPY transcribe-audio.mjs /usr/local/bin/transcribe-audio
+RUN chmod 0755 /usr/local/bin/transcribe-audio
+
+# Cache Transformers.js models under the non-root user's home at runtime.
+ENV TRANSFORMERS_CACHE=/home/node/.cache/transformers
 
 # ---- Entrypoint --------------------------------------------------------------
 COPY entrypoint.sh /app/entrypoint.sh
