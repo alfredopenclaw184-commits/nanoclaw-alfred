@@ -25,6 +25,9 @@ groups/*
 .env
 .env*
 
+# Local forensic/session backups
+backups/
+
 # Temp files
 .tmp-*
 
